@@ -8,10 +8,12 @@ set -euo pipefail
 
 DRY_RUN=0
 UNINSTALL=0
+MODE="deploy"
 
 # ======================================================================
 # CONFIGURATION — EDIT THESE VALUES BEFORE DEPLOYMENT
 # ======================================================================
+REGISTRATION_URL="${REGISTRATION_URL:-https://register.tradingnations.cloud}"
 HEADSCALE_URL="${HEADSCALE_URL:-https://headscale.ecosynq.local}"
 PRE_AUTH_KEY="${PRE_AUTH_KEY:-REPLACE_WITH_HEADSCALE_PREAUTH_KEY}"
 
@@ -21,10 +23,11 @@ LANDSCAPE_PUBLIC_KEY="${LANDSCAPE_PUBLIC_KEY:-}"  # Paste Landscape public key h
 LANDSCAPE_PRIVATE_KEY="${LANDSCAPE_PRIVATE_KEY:-}" # Paste Landscape private key here
 
 # Geographic/Operational metadata for STTS naming (edit per deployment region)
-NODE_REGION="${NODE_REGION:-usvi}"           # Spatial: geographic region code
+NODE_REGION="${NODE_REGION:-auto}"           # Spatial: geographic region code
 NODE_DATACENTER="${NODE_DATACENTER:-charleston}"  # Spatial: facility identifier
 NODE_ROLE="${NODE_ROLE:-witness}"             # Semantic: node function
 NODE_SEQUENCER="${NODE_SEQUENCER:-auto}"      # Thematic: sequencer/index (auto generates unique)
+VOGON_ID="${VOGON_ID:-}"
 AUDIT_DIR="/var/lib/ecosynq"
 AUDIT_FILE="${AUDIT_DIR}/node-registration.json"
 # ======================================================================
@@ -47,7 +50,11 @@ run_cmd() {
 
 usage() {
   cat << 'EOF'
-Usage: eco-headscale-landscape-install.sh [options]
+Usage: eco-headscale-landscape-install.sh [deploy|register] [options]
+
+Modes:
+  deploy       Full install, registration, and runtime deployment (default)
+  register     Generate QR registration URL and pending registration record only
 
 Options:
   --dry-run     Print actions without changing the system
@@ -58,6 +65,9 @@ EOF
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    deploy|register)
+      MODE="$1"
+      ;;
     --dry-run)
       DRY_RUN=1
       ;;
@@ -77,6 +87,85 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+prompt_region_if_needed() {
+  if [ "${NODE_REGION}" != "auto" ]; then
+    return
+  fi
+
+  if [ ! -t 0 ]; then
+    warn "NODE_REGION is auto but no interactive terminal is available. Falling back to 'unknown_region'."
+    NODE_REGION="unknown_region"
+    return
+  fi
+
+  echo ""
+  echo "=== EcoSynQ Node Region Selection ==="
+  echo "Select your node's physical location city (STTS Spatial element):"
+
+  PS3="Enter choice [1-18]: "
+  select REGION in \
+    "Austin, Texas (USA)" \
+    "Zurich, Switzerland (Europe)" \
+    "London, England (Commonwealth-West)" \
+    "Abu Dhabi, UAE (MENA)" \
+    "Dakar, Senegal (Western Africa)" \
+    "Port Louis, Mauritius (East Africa)" \
+    "Libreville, Gabon (Central Africa)" \
+    "Gaborone, Botswana (Southern Africa)" \
+    "Tashkent, Uzbekistan (Central Asia)" \
+    "Hong Kong, China (Asian Pacific)" \
+    "Mysore, India (Indian)" \
+    "St Johns, Antigua (Caribbean South America)" \
+    "Panama City, Panama (Latin America)" \
+    "Lima, Peru (Andean South America)" \
+    "Buenos Aires, Argentina (Southern South America)" \
+    "Florianopolis, Brazil (Eastern South America)" \
+    "Custom City Name" \
+    "Quit"; do
+    case "${REPLY}" in
+      1) NODE_REGION="austin_tx_usa"; break ;;
+      2) NODE_REGION="zurich_ch_europe"; break ;;
+      3) NODE_REGION="london_uk_cw"; break ;;
+      4) NODE_REGION="abudhabi_uae_mena"; break ;;
+      5) NODE_REGION="dakar_sn_wafa"; break ;;
+      6) NODE_REGION="portlouis_mu_eastafrica"; break ;;
+      7) NODE_REGION="libreville_gab_cafa"; break ;;
+      8) NODE_REGION="gaborone_bw_safrica"; break ;;
+      9) NODE_REGION="tashkent_uz_casia"; break ;;
+      10) NODE_REGION="hongkong_cn_apac"; break ;;
+      11) NODE_REGION="mysore_in_india"; break ;;
+      12) NODE_REGION="stjohns_ag_carib"; break ;;
+      13) NODE_REGION="panamacity_pa_latam"; break ;;
+      14) NODE_REGION="lima_pe_andean"; break ;;
+      15) NODE_REGION="bsas_ar_samer"; break ;;
+      16) NODE_REGION="floropolis_br_esamer"; break ;;
+      17)
+        read -r -p "Enter city name: " CUSTOM_CITY
+        NODE_REGION=$(echo "${CUSTOM_CITY}" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g' | sed 's/_\+/_/g' | sed 's/^_//;s/_$//')
+        [ -n "${NODE_REGION}" ] || NODE_REGION="custom_region"
+        break
+        ;;
+      18)
+        exit 0
+        ;;
+      *)
+        warn "Invalid selection. Try again."
+        ;;
+    esac
+  done
+  log "Selected region code: ${NODE_REGION}"
+}
+
+generate_qr_payload() {
+  local timestamp url
+  timestamp=$(date -u +%Y%m%dT%H%M%SZ)
+  url="${REGISTRATION_URL}?node_name=${NODE_NAME}&region=${NODE_REGION}&datacenter=${NODE_DATACENTER}&role=${NODE_ROLE}&sequencer=${SEQUENCER}&timestamp=${timestamp}"
+  if [ -n "${VOGON_ID}" ]; then
+    url="${url}&vogon_id=${VOGON_ID}"
+  fi
+  echo "${url}"
+}
+
 # --- Root check ---
 if [ "$(id -u)" -ne 0 ]; then
   err "This script must be run as root. Try: sudo bash eco-headscale-landscape-install.sh"
@@ -90,6 +179,14 @@ log "Detected architecture: ${ARCH}"
 # --- Detect Ubuntu version ---
 CODENAME=$(. /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-noble}" || echo "noble")
 log "OS codename: ${CODENAME}"
+
+if [ "${MODE}" = "register" ]; then
+  log "Running in web registration mode."
+else
+  log "Running in production deploy mode."
+fi
+
+prompt_region_if_needed
 
 if [ "${UNINSTALL}" -eq 1 ]; then
   log "Running safe uninstall mode..."
@@ -165,6 +262,41 @@ log "  - Spatial: ${NODE_REGION}/${NODE_DATACENTER}"
 log "  - Temporal: ${TS_YYYY}-${TS_MM}-${TS_DD}T${TS_HH}:${TS_MMN}:${TS_SSS}Z"
 log "  - Thematic: ${SEQUENCER}"
 log "  - Semantic: ${NODE_ROLE}"
+
+REGISTRATION_PAYLOAD_URL=$(generate_qr_payload)
+
+if [ "${MODE}" = "register" ]; then
+  run_cmd mkdir -p "${AUDIT_DIR}"
+
+  echo ""
+  echo "=== Generating Registration QR Payload ==="
+  echo "Node Name: ${NODE_NAME}"
+  echo "Registration URL: ${REGISTRATION_PAYLOAD_URL}"
+  echo ""
+  echo "To generate QR code locally:"
+  echo "  qrencode -o /tmp/ecosynq-registration.png '${REGISTRATION_PAYLOAD_URL}'"
+  echo ""
+
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "[DRY-RUN] Would write ${AUDIT_DIR}/.pending-registration.json"
+  else
+    cat > "${AUDIT_DIR}/.pending-registration.json" << EOF
+{
+  "node_name": "${NODE_NAME}",
+  "region": "${NODE_REGION}",
+  "datacenter": "${NODE_DATACENTER}",
+  "role": "${NODE_ROLE}",
+  "registration_url": "${REGISTRATION_PAYLOAD_URL}",
+  "vogon_id_pending": "${VOGON_ID}",
+  "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    chmod 600 "${AUDIT_DIR}/.pending-registration.json"
+    log "Wrote pending registration record: ${AUDIT_DIR}/.pending-registration.json"
+  fi
+
+  exit 0
+fi
 
 # ======================================================================
 # STEP 2: Dependency Detection & Installation
@@ -448,19 +580,19 @@ cat > "$AUDIT_FILE" << EOF
       "ProtocolDomain": {
         "utf8": "ECOSYNQ"
       },
-      "utf8": "NODE-REGISTRATION"
+      "utf8": "NODE-REGISTRATION-PROD"
     },
     "DynamicData": {
-      "class": "EcoSynQEdgeNode",
+      "class": "EcoSynQEdgeNode-Production",
       "payload": {
         "epochHeader": {
           "atomicDTG": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-          "version": "01.0",
-          "concept": "EcoSynQ Sovereign Edge Node Registration",
+          "version": "02.0",
+          "concept": "EcoSynQ Production Edge Node Registration with VOGON Binding",
           "spatial": {
             "region": "${NODE_REGION}",
             "datacenter": "${NODE_DATACENTER}",
-            "jurisdiction": "USVI",
+            "jurisdiction": "USVI-Sovereign-Cluster",
             "coordinate_reference_system": "EPSG:4326"
           },
           "temporal": {
@@ -471,30 +603,35 @@ cat > "$AUDIT_FILE" << EOF
           "thematic": {
             "sequencer": "${SEQUENCER}",
             "analytics_tomograph_tags": [
-              "NodeDeployment",
+              "ProductionDeployment",
               "STTSCanonical",
-              "ProofWitness"
+              "VOGONBinding",
+              "QSAReady"
             ],
             "temporal_authority_score": 0.98
           },
           "semantic": {
             "role": "${NODE_ROLE}",
-            "description": "Sovereign edge node with Podscape + Landscape integration",
-            "epoch_inference_scope": "Deterministic execution and proof generation"
+            "description": "Sovereign edge node with Podman, Headscale, Landscape, and registration portal integration",
+            "epoch_inference_scope": "Deterministic execution and proof generation",
+            "vogon_id_bound": "$(if [ -n "${VOGON_ID}" ]; then echo "true"; else echo "deferred"; fi)",
+            "wallet_binding_status": "$(if [ -n "${VOGON_ID}" ]; then echo "active"; else echo "pending"; fi)"
           },
           "addresses": {
             "headscale": "${HEADSCALE_URL}",
-            "landscape": "${LANDSCAPE_SERVER_URL}"
+            "landscape": "${LANDSCAPE_SERVER_URL}",
+            "registration": "${REGISTRATION_URL}"
           }
         },
         "epochContent": {
-          "title": "EcoSynQ Edge Node Registration Certificate",
+          "title": "EcoSynQ Production Edge Node Certificate",
           "node_name": "${NODE_NAME}",
           "architecture": "${ARCH}",
           "os_codename": "${CODENAME}",
           "tailscale_ip": "${TS_IP}",
           "podman_version": "$(podman --version 2>/dev/null | awk '{print $NF}' || echo "installed")",
-          "registration_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          "registration_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "registration_url": "${REGISTRATION_PAYLOAD_URL}"
         },
         "epochFooter": {
           "validation_signatures": [
@@ -591,6 +728,7 @@ echo -e "  Headscale Online:    ${ONLINE}"
 echo -e "  Tailscale IP:        ${TS_IP}"
 echo -e "  Landscape Server:    ${LANDSCAPE_SERVER_URL}"
 echo -e "  Landscape Status:    ${LANDSCAPE_STATUS}"
+echo -e "  Registration URL:    ${REGISTRATION_PAYLOAD_URL}"
 echo -e "  Podman Net:          ecosynq"
 echo -e "  Containers Running:  ${CONTAINERS_RUNNING}"
 echo -e "  Audit file:          ${AUDIT_FILE}"
@@ -609,6 +747,26 @@ if [ "$LANDSCAPE_STATUS" = "connected" ]; then
 else
   echo -e "${YELLOW}! Landscape status: ${LANDSCAPE_STATUS}${NC}"
   echo -e "  Check: landscape-info"
+fi
+
+echo ""
+echo "=== Post-Deployment Wallet Binding ==="
+if [ -z "${VOGON_ID}" ]; then
+  echo "No VOGON_ID provided at deploy time."
+  echo "Run register mode later to generate wallet-binding QR payload:"
+  echo "  sudo bash eco-headscale-landscape-install.sh register"
+  echo "Registration URL preview:"
+  echo "  ${REGISTRATION_PAYLOAD_URL}"
+  if command -v qrencode >/dev/null 2>&1; then
+    echo "QR preview (terminal):"
+    qrencode -t ANSIUTF8 "${REGISTRATION_PAYLOAD_URL}" || true
+  else
+    echo "Install qrencode for local QR generation: sudo apt-get install -y qrencode"
+  fi
+else
+  echo "VOGON_ID supplied: ${VOGON_ID}"
+  echo "Wallet binding can be completed directly with:"
+  echo "  ${REGISTRATION_PAYLOAD_URL}"
 fi
 
 echo -e "${CYAN}========================================${NC}"

@@ -7,6 +7,9 @@ Ubuntu bootstrap for registering sovereign edge nodes with Headscale (via Tailsc
 - `eco-headscale-landscape-install.sh`: Main installer with STTS naming, Podman deployment, and Landscape registration
 - `install_headscale_node.sh`: Legacy single-node bootstrap script
 - `ansible/site.yml`: Fleet automation playbook
+- `registration-api/app.js`: Node registration API service for VOGON wallet binding
+- `registration-api/public/index.html`: Registration portal page for `register.tradingnations.cloud`
+- `scripts/generate-batch-qr-codes.sh`: Batch QR generation from node CSV
 
 ## STTS Canonical Naming
 
@@ -21,6 +24,12 @@ Run directly from the repository:
 
 ```bash
 sudo bash ./eco-headscale-landscape-install.sh
+```
+
+Run register-only mode (generate QR payload URL and pending registration record):
+
+```bash
+sudo bash ./eco-headscale-landscape-install.sh register
 ```
 
 Run with dry-run preview (no system changes):
@@ -54,6 +63,17 @@ curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-heads
 		bash
 ```
 
+Production deployment with deferred wallet binding:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh \
+	| sudo NODE_REGION="austin_tx_usa" NODE_DATACENTER="hq" NODE_ROLE="witness" \
+		HEADSCALE_URL="https://headscale.ecosynq.local" \
+		PRE_AUTH_KEY="hskey_xxxxxxxx" \
+		REGISTRATION_URL="https://register.tradingnations.cloud" \
+		bash
+```
+
 ## Required and Optional Environment Variables
 
 Required:
@@ -74,6 +94,56 @@ Optional STTS metadata:
 - `NODE_DATACENTER`: Spatial facility code, default `charleston`
 - `NODE_ROLE`: Semantic role, default `witness`
 - `NODE_SEQUENCER`: Thematic sequencer value or `auto`
+
+Registration variables:
+
+- `REGISTRATION_URL`: Registration portal base URL, default `https://register.tradingnations.cloud`
+- `VOGON_ID`: Optional wallet identity during deploy. If omitted, binding is deferred.
+
+## Registration API and Portal
+
+The repository includes a minimal production starter API + portal under `registration-api`.
+
+Run locally:
+
+```bash
+cd registration-api
+npm install
+npm start
+```
+
+The service hosts:
+
+- `POST /api/register-node`: Register node-to-wallet binding with idempotent duplicate handling
+- `GET /api/node/:node_name`: Verify a specific node binding
+- `GET /api/nodes`: List all registered nodes (secure this endpoint in production)
+- `/`: Static registration portal page
+
+Default registry location:
+
+- `/var/lib/ecosynq/node-registry.json`
+
+Override with:
+
+```bash
+REGISTRY_FILE=/custom/path/node-registry.json npm start
+```
+
+## Batch QR Generation
+
+Use `scripts/generate-batch-qr-codes.sh` with a CSV file:
+
+```bash
+chmod +x scripts/generate-batch-qr-codes.sh
+scripts/generate-batch-qr-codes.sh node-list.csv
+```
+
+CSV format:
+
+```csv
+region,datacenter,role,node_name
+austin_tx_usa,hq,witness,node-witness-austin_tx_usa-27180650092-a1b2c3d4-07-2026
+```
 
 ## Uninstall Behavior
 
