@@ -6,6 +6,9 @@
 #
 set -euo pipefail
 
+DRY_RUN=0
+UNINSTALL=0
+
 # ======================================================================
 # CONFIGURATION — EDIT THESE VALUES BEFORE DEPLOYMENT
 # ======================================================================
@@ -22,6 +25,8 @@ NODE_REGION="${NODE_REGION:-usvi}"           # Spatial: geographic region code
 NODE_DATACENTER="${NODE_DATACENTER:-charleston}"  # Spatial: facility identifier
 NODE_ROLE="${NODE_ROLE:-witness}"             # Semantic: node function
 NODE_SEQUENCER="${NODE_SEQUENCER:-auto}"      # Thematic: sequencer/index (auto generates unique)
+AUDIT_DIR="/var/lib/ecosynq"
+AUDIT_FILE="${AUDIT_DIR}/node-registration.json"
 # ======================================================================
 
 # --- Colors ---
@@ -31,6 +36,46 @@ NC='\033[0m'
 log()  { echo -e "${GREEN}[$(date '+%H:%M:%S')]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 err()  { echo -e "${RED}[ERROR]${NC} $1" >&2; }
+
+run_cmd() {
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "[DRY-RUN] $*"
+  else
+    "$@"
+  fi
+}
+
+usage() {
+  cat << 'EOF'
+Usage: eco-headscale-landscape-install.sh [options]
+
+Options:
+  --dry-run     Print actions without changing the system
+  --uninstall   Safely remove EcoSynQ containers/network and local audit record
+  -h, --help    Show this help
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    --uninstall)
+      UNINSTALL=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      err "Unknown option: $1"
+      usage
+      exit 1
+      ;;
+  esac
+  shift
+done
 
 # --- Root check ---
 if [ "$(id -u)" -ne 0 ]; then
@@ -45,6 +90,39 @@ log "Detected architecture: ${ARCH}"
 # --- Detect Ubuntu version ---
 CODENAME=$(. /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-noble}" || echo "noble")
 log "OS codename: ${CODENAME}"
+
+if [ "${UNINSTALL}" -eq 1 ]; then
+  log "Running safe uninstall mode..."
+
+  if command -v podman >/dev/null 2>&1; then
+    for container in ecosynq-immudb ecosynq-postgres ecosynq-redis; do
+      if podman container exists "${container}" 2>/dev/null; then
+        run_cmd podman rm -f "${container}"
+      else
+        log "Container not present: ${container}"
+      fi
+    done
+
+    if podman network exists ecosynq 2>/dev/null; then
+      run_cmd podman network rm ecosynq || warn "Could not remove network 'ecosynq' (it may still be in use)."
+    else
+      log "Network not present: ecosynq"
+    fi
+  else
+    warn "Podman not installed; skipping container and network cleanup."
+  fi
+
+  if [ -f "${AUDIT_FILE}" ]; then
+    run_cmd rm -f "${AUDIT_FILE}"
+    log "Removed local audit record: ${AUDIT_FILE}"
+  else
+    log "No local audit record found at: ${AUDIT_FILE}"
+  fi
+
+  warn "Safe uninstall preserves package installations, volumes, and remote registrations."
+  warn "If desired, manually run: tailscale down and landscape-config --help"
+  exit 0
+fi
 
 # ======================================================================
 # STEP 1: STTS Canonical Node Name Generation
@@ -120,8 +198,8 @@ if [ ${#DEPS_MISSING[@]} -gt 0 ]; then
 
   if [ ${#TO_INSTALL[@]} -gt 0 ]; then
     log "Installing missing dependencies: ${TO_INSTALL[*]}"
-    apt-get update -qq
-    apt-get install -y -qq "${TO_INSTALL[@]}"
+    run_cmd apt-get update -qq
+    run_cmd apt-get install -y -qq "${TO_INSTALL[@]}"
   fi
 else
   log "All dependencies satisfied."
@@ -142,26 +220,30 @@ else
   # Add Podman repository
   case "${CODENAME}" in
     jammy|noble)
-      apt-get update -qq
-      apt-get install -y -qq software-properties-common
-      add-apt-repository -y ppa:projectatomic/podman-standalone 2>/dev/null || true
-      apt-get update -qq
+      run_cmd apt-get update -qq
+      run_cmd apt-get install -y -qq software-properties-common
+      if [ "${DRY_RUN}" -eq 1 ]; then
+        log "[DRY-RUN] add-apt-repository -y ppa:projectatomic/podman-standalone"
+      else
+        add-apt-repository -y ppa:projectatomic/podman-standalone 2>/dev/null || true
+      fi
+      run_cmd apt-get update -qq
       ;;
     focal)
       # Older Ubuntu: use Snap or direct binary
-      snap install podman --classic 2>/dev/null || {
+      run_cmd snap install podman --classic 2>/dev/null || {
         log "Snap not available, trying alternative installation..."
-        wget -q https://github.com/containers/podman/releases/download/v4.9.4/podman_4.9.4_amd64.deb
-        dpkg -i podman_4.9.4_amd64.deb
-        rm -f podman_4.9.4_amd64.deb
+        run_cmd wget -q https://github.com/containers/podman/releases/download/v4.9.4/podman_4.9.4_amd64.deb
+        run_cmd dpkg -i podman_4.9.4_amd64.deb
+        run_cmd rm -f podman_4.9.4_amd64.deb
       }
       ;;
   esac
 
   # Alternative: direct apt package
   if ! command -v podman >/dev/null 2>&1; then
-    apt-get update -qq
-    apt-get install -y -qq podman containernetworking-tools crun
+    run_cmd apt-get update -qq
+    run_cmd apt-get install -y -qq podman containernetworking-tools crun
   fi
 
   if command -v podman >/dev/null 2>&1; then
@@ -174,7 +256,7 @@ else
 fi
 
 # Configure Podman to use systemd
-mkdir -p ~/.config/systemd/user/
+run_cmd mkdir -p ~/.config/systemd/user/
 log "Configuring Podman rootless mode..."
 
 # ======================================================================
@@ -192,14 +274,22 @@ else
   log "Installing Tailscale client..."
 
   # Official Tailscale install script
-  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.noarmor.gpg" \
-    | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "[DRY-RUN] curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.noarmor.gpg | tee /usr/share/keyrings/tailscale-archive-keyring.gpg"
+  else
+    curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.noarmor.gpg" \
+      | tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+  fi
 
-  curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.tailscale-keyring.list" \
-    | tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+  if [ "${DRY_RUN}" -eq 1 ]; then
+    log "[DRY-RUN] curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.tailscale-keyring.list | tee /etc/apt/sources.list.d/tailscale.list"
+  else
+    curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/${CODENAME}.tailscale-keyring.list" \
+      | tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+  fi
 
-  apt-get update -qq
-  apt-get install -y -qq tailscale
+  run_cmd apt-get update -qq
+  run_cmd apt-get install -y -qq tailscale
 
   if command -v tailscale >/dev/null 2>&1; then
     log "Tailscale installed successfully."
@@ -213,8 +303,8 @@ fi
 # Ensure tailscaled is running
 if ! systemctl is-active --quiet tailscaled 2>/dev/null; then
   log "Starting tailscaled service..."
-  systemctl enable --now tailscaled
-  sleep 2
+  run_cmd systemctl enable --now tailscaled
+  [ "${DRY_RUN}" -eq 1 ] || sleep 2
 fi
 
 # ======================================================================
@@ -233,7 +323,7 @@ if [ -n "$EXISTING_STATUS" ] && [ "$EXISTING_STATUS" != "unknown" ] && [ "$EXIST
   CURRENT_HOSTNAME=$(tailscale status --json 2>/dev/null | jq -r '.Self.DNSName // "unknown"' 2>/dev/null || echo "")
   if [[ "$CURRENT_HOSTNAME" != *"$NODE_NAME"* ]]; then
     warn "Hostname mismatch. Resetting tailscale configuration..."
-    tailscale down 2>/dev/null || true
+    run_cmd tailscale down 2>/dev/null || true
   fi
 fi
 
@@ -250,7 +340,7 @@ TS_UP_CMD=(
 )
 
 log "Executing Headscale adoption..."
-if "${TS_UP_CMD[@]}" 2>&1; then
+if run_cmd "${TS_UP_CMD[@]}" 2>&1; then
   log "Headscale adoption command submitted successfully."
 else
   warn "tailscale up returned non-zero — node may already be registered or needs manual approval."
@@ -259,7 +349,7 @@ fi
 
 # Wait for network convergence
 log "Waiting for mesh convergence..."
-sleep 4
+[ "${DRY_RUN}" -eq 1 ] || sleep 4
 
 # ======================================================================
 # STEP 6: Install and Register with Ubuntu Landscape Server
@@ -273,8 +363,8 @@ if command -v landscape-client >/dev/null 2>&1; then
   log "Landscape already installed (${CURRENT_VER})"
   LANDSCAPE_INSTALLED=1
 else
-  apt-get update -qq
-  apt-get install -y -qq landscape-client landscape-common
+  run_cmd apt-get update -qq
+  run_cmd apt-get install -y -qq landscape-client landscape-common
   LANDSCAPE_INSTALLED=1
 fi
 
@@ -293,12 +383,15 @@ if [ -n "$LANDSCAPE_PUBLIC_KEY" ] && [ -n "$LANDSCAPE_PRIVATE_KEY" ]; then
     --tags="ecosynq,${NODE_ROLE},${NODE_REGION},stts-canonical"
   )
 
-  if "${REGISTER_CMD[@]}" 2>&1; then
+  if run_cmd "${REGISTER_CMD[@]}" 2>&1; then
     log "Landscape registration successful."
   else
     warn "Landscape registration failed — check credentials and server URL."
     warn "Manual registration command saved to: /tmp/landscape-register.sh"
-    cat > /tmp/landscape-register.sh << EOF
+    if [ "${DRY_RUN}" -eq 1 ]; then
+      log "[DRY-RUN] Would write fallback command to /tmp/landscape-register.sh"
+    else
+      cat > /tmp/landscape-register.sh << EOF
 #!/bin/bash
 landscape-config \\
   --computer-title="${NODE_NAME}" \\
@@ -308,7 +401,8 @@ landscape-config \\
   --private-key-content="${LANDSCAPE_PRIVATE_KEY}" \\
   --tags="ecosynq,${NODE_ROLE},${NODE_REGION},stts-canonical"
 EOF
-    chmod +x /tmp/landscape-register.sh
+      chmod +x /tmp/landscape-register.sh
+    fi
   fi
 else
   warn "Landscape keys not configured. Skipping automatic registration."
@@ -324,7 +418,11 @@ LANDSCAPE_STATUS="not_configured"
 
 if command -v jq >/dev/null 2>&1; then
   TS_STATUS_JSON=$(tailscale status --json 2>/dev/null || echo "")
-  LANDSCAPE_STATUS=$(landscape-info 2>/dev/null | grep -i "connected" | head -1 || echo "not_connected")
+  if landscape-info 2>/dev/null | grep -qi "connected"; then
+    LANDSCAPE_STATUS="connected"
+  else
+    LANDSCAPE_STATUS="not_connected"
+  fi
 fi
 
 ONLINE="unknown"
@@ -338,10 +436,11 @@ fi
 # ======================================================================
 # STEP 8: Write Local Registration Record (Vogon-Style JSON)
 # ======================================================================
-AUDIT_DIR="/var/lib/ecosynq"
-AUDIT_FILE="${AUDIT_DIR}/node-registration.json"
-mkdir -p "$AUDIT_DIR"
+run_cmd mkdir -p "$AUDIT_DIR"
 
+if [ "${DRY_RUN}" -eq 1 ]; then
+  log "[DRY-RUN] Would write local registration record to ${AUDIT_FILE}"
+else
 cat > "$AUDIT_FILE" << EOF
 {
   "FormalVogonArtifact": {
@@ -412,7 +511,8 @@ cat > "$AUDIT_FILE" << EOF
   }
 }
 EOF
-chmod 600 "$AUDIT_FILE"
+run_cmd chmod 600 "$AUDIT_FILE"
+fi
 
 # ======================================================================
 # STEP 9: Deploy EcoSynQ Podman Containers
@@ -423,12 +523,12 @@ log "Deploying EcoSynQ runtime containers via Podman..."
 PODMAN_NET_EXISTS=$(podman network ls --format '{{.Name}}' 2>/dev/null | grep -c "ecosynq" || echo "0")
 if [ "$PODMAN_NET_EXISTS" -eq 0 ]; then
   log "Creating Podman network 'ecosynq'..."
-  podman network create ecosynq
+  run_cmd podman network create ecosynq
 fi
 
 # Deploy immudb (immutable proof store)
 log "Deploying immudb container..."
-podman run -d \
+run_cmd podman run -d \
   --name ecosynq-immudb \
   --network ecosynq \
   --restart unless-stopped \
@@ -440,7 +540,7 @@ podman run -d \
 
 # Deploy PostgreSQL (operational facts layer)
 log "Deploying PostgreSQL container..."
-podman run -d \
+run_cmd podman run -d \
   --name ecosynq-postgres \
   --network ecosynq \
   --restart unless-stopped \
@@ -453,7 +553,7 @@ podman run -d \
 
 # Deploy Redis (caching and ephemeral state)
 log "Deploying Redis container..."
-podman run -d \
+run_cmd podman run -d \
   --name ecosynq-redis \
   --network ecosynq \
   --restart unless-stopped \
@@ -463,7 +563,12 @@ podman run -d \
 
 # Log container statuses
 log "Podman container deployment status:"
-podman ps --filter "name=ecosynq" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+run_cmd podman ps --filter "name=ecosynq" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+
+CONTAINERS_RUNNING="0"
+if command -v podman >/dev/null 2>&1; then
+  CONTAINERS_RUNNING=$(podman ps --filter "name=ecosynq" -q 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+fi
 
 # ======================================================================
 # REPORT
@@ -487,7 +592,7 @@ echo -e "  Tailscale IP:        ${TS_IP}"
 echo -e "  Landscape Server:    ${LANDSCAPE_SERVER_URL}"
 echo -e "  Landscape Status:    ${LANDSCAPE_STATUS}"
 echo -e "  Podman Net:          ecosynq"
-echo -e "  Containers Running:  $(podman ps --filter "name=ecosynq" -q | wc -l)"
+echo -e "  Containers Running:  ${CONTAINERS_RUNNING}"
 echo -e "  Audit file:          ${AUDIT_FILE}"
 echo ""
 echo -e "${CYAN}========================================${NC}"

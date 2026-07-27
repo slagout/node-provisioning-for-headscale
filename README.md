@@ -1,27 +1,93 @@
 # Node Provisioning for Headscale
 
-Portable Ubuntu 24.04 bootstrap for registering Tailscale clients against a Headscale control server using a UTC timestamp-based node naming scheme.
+Ubuntu bootstrap for registering sovereign edge nodes with Headscale (via Tailscale), Ubuntu Landscape, and Podman-based EcoSynQ runtime services.
 
 ## Contents
 
-- `install_headscale_node.sh`: Single-node bootstrap script
+- `eco-headscale-landscape-install.sh`: Main installer with STTS naming, Podman deployment, and Landscape registration
+- `install_headscale_node.sh`: Legacy single-node bootstrap script
 - `ansible/site.yml`: Fleet automation playbook
 
-## Naming Scheme
+## STTS Canonical Naming
 
-- Human stamp: `DDHHMMSS.mmmZ MON YYYY`
-- Hostname-safe stamp: `node-ddhhmmssmmmz-mon-yyyy`
-- Example: `node-27180650092z-jul-2026`
+Installer-generated node names include Spatial, Temporal, Thematic, and Semantic elements:
 
-## Script Usage
+- Format: `node-<role>-<region>-<ddhhmmmmm>-<sequencer>-<mm>-<yyyy>`
+- Example: `node-witness-usvi-27180650092-9f3a2b1c-50-2026`
 
-Set required variables and run as root:
+## Installer Usage
+
+Run directly from the repository:
 
 ```bash
-export HEADSCALE_SERVER_URL="https://headscale.example.local"
-export HEADSCALE_PRE_AUTH_KEY="tskey-auth-..."
-sudo -E bash ./install_headscale_node.sh
+sudo bash ./eco-headscale-landscape-install.sh
 ```
+
+Run with dry-run preview (no system changes):
+
+```bash
+sudo bash ./eco-headscale-landscape-install.sh --dry-run
+```
+
+Run safe uninstall mode (removes EcoSynQ containers/network and local audit record only):
+
+```bash
+sudo bash ./eco-headscale-landscape-install.sh --uninstall
+```
+
+One-liner from GitHub raw:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh | sudo bash
+```
+
+With deployment variables:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh \
+	| sudo NODE_REGION="usvi" NODE_DATACENTER="charleston" NODE_ROLE="witness" \
+		HEADSCALE_URL="https://headscale.ecosynq.local" \
+		PRE_AUTH_KEY="hskey_xxxxxxxx" \
+		LANDSCAPE_SERVER_URL="https://landscape.ecosynq.local" \
+		LANDSCAPE_PUBLIC_KEY="$(cat /path/to/landscape.pub)" \
+		LANDSCAPE_PRIVATE_KEY="$(cat /path/to/landscape.pem)" \
+		bash
+```
+
+## Required and Optional Environment Variables
+
+Required:
+
+- `HEADSCALE_URL`: Headscale URL, for example `https://headscale.ecosynq.local`
+- `PRE_AUTH_KEY`: Headscale pre-auth key
+
+Optional (recommended for Landscape auto-registration):
+
+- `LANDSCAPE_SERVER_URL`: Landscape server URL
+- `LANDSCAPE_ACCOUNT_NAME`: Landscape account name
+- `LANDSCAPE_PUBLIC_KEY`: Landscape public key content
+- `LANDSCAPE_PRIVATE_KEY`: Landscape private key content
+
+Optional STTS metadata:
+
+- `NODE_REGION`: Spatial region code, default `usvi`
+- `NODE_DATACENTER`: Spatial facility code, default `charleston`
+- `NODE_ROLE`: Semantic role, default `witness`
+- `NODE_SEQUENCER`: Thematic sequencer value or `auto`
+
+## Uninstall Behavior
+
+Safe uninstall mode intentionally preserves:
+
+- Installed packages (`podman`, `tailscale`, `landscape-client`)
+- Podman volumes (`immudb-data`, `postgres-data`, `redis-data`)
+- Remote registrations (Headscale and Landscape)
+
+It removes:
+
+- Containers `ecosynq-immudb`, `ecosynq-postgres`, `ecosynq-redis`
+- Podman network `ecosynq` (if removable)
+- Local audit file `/var/lib/ecosynq/node-registration.json`
 
 ## Ansible Variables
 
@@ -34,6 +100,6 @@ headscale_pre_auth_key: "tskey-auth-..."
 
 ## Security Notes
 
-- Keep pre-auth keys out of source control.
-- Prefer short-lived keys and rotation.
-- Restrict audit file permissions under `/var/lib/ecosynq`.
+- Keep pre-auth and Landscape key material out of source control.
+- Prefer short-lived Headscale pre-auth keys and rotate frequently.
+- Keep `/var/lib/ecosynq/node-registration.json` restricted (`0600`).
