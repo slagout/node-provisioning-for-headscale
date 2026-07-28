@@ -55,9 +55,9 @@ With deployment variables:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh \
 	| sudo NODE_REGION="usvi" NODE_DATACENTER="charleston" NODE_ROLE="witness" \
-		HEADSCALE_URL="https://headscale.ecosynq.local" \
+		HEADSCALE_URL="https://headscale.tradingnations.cloud" \
 		PRE_AUTH_KEY="hskey_xxxxxxxx" \
-		LANDSCAPE_SERVER_URL="https://landscape.ecosynq.local" \
+		LANDSCAPE_SERVER_URL="https://landscape.tradingnations.cloud" \
 		LANDSCAPE_PUBLIC_KEY="$(cat /path/to/landscape.pub)" \
 		LANDSCAPE_PRIVATE_KEY="$(cat /path/to/landscape.pem)" \
 		bash
@@ -68,7 +68,7 @@ Production deployment with deferred wallet binding:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh \
 	| sudo NODE_REGION="austin_tx_usa" NODE_DATACENTER="hq" NODE_ROLE="witness" \
-		HEADSCALE_URL="https://headscale.ecosynq.local" \
+		HEADSCALE_URL="https://headscale.tradingnations.cloud" \
 		PRE_AUTH_KEY="hskey_xxxxxxxx" \
 		REGISTRATION_URL="https://register.tradingnations.cloud" \
 		bash
@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-heads
 
 Required:
 
-- `HEADSCALE_URL`: Headscale URL, for example `https://headscale.ecosynq.local`
+- `HEADSCALE_URL`: Headscale URL, for example `https://headscale.tradingnations.cloud`
 - `PRE_AUTH_KEY`: Headscale pre-auth key
 
 Optional (recommended for Landscape auto-registration):
@@ -99,6 +99,13 @@ Registration variables:
 
 - `REGISTRATION_URL`: Registration portal base URL, default `https://register.tradingnations.cloud`
 - `VOGON_ID`: Optional wallet identity during deploy. If omitted, binding is deferred.
+
+Cloudflare routing note:
+
+- Ensure the public hostnames are routed through your tunnel to the correct origin services before provisioning:
+	- `headscale.tradingnations.cloud` -> `https://headscale.ecosynq.local:8443`
+	- `landscape.tradingnations.cloud` -> `https://landscape.ecosynq.local:4443`
+	- `register.tradingnations.cloud` -> your registration API origin
 
 ## Registration API and Portal
 

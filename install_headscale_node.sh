@@ -7,7 +7,7 @@ set -euo pipefail
 # =========================
 
 # Required env vars:
-#   HEADSCALE_SERVER_URL   e.g. https://headscale.ecosynq.local
+#   HEADSCALE_SERVER_URL   e.g. https://headscale.tradingnations.cloud
 #   HEADSCALE_PRE_AUTH_KEY pre-auth key value
 #
 # Optional env vars:

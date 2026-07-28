@@ -14,10 +14,10 @@ MODE="deploy"
 # CONFIGURATION — EDIT THESE VALUES BEFORE DEPLOYMENT
 # ======================================================================
 REGISTRATION_URL="${REGISTRATION_URL:-https://register.tradingnations.cloud}"
-HEADSCALE_URL="${HEADSCALE_URL:-https://headscale.ecosynq.local}"
-PRE_AUTH_KEY="${PRE_AUTH_KEY:-REPLACE_WITH_HEADSCALE_PREAUTH_KEY}"
+HEADSCALE_URL="${HEADSCALE_URL:-https://headscale.tradingnations.cloud}"
+PRE_AUTH_KEY="${PRE_AUTH_KEY:-}"
 
-LANDSCAPE_SERVER_URL="${LANDSCAPE_SERVER_URL:-https://landscape.ecosynq.local}"
+LANDSCAPE_SERVER_URL="${LANDSCAPE_SERVER_URL:-https://landscape.tradingnations.cloud}"
 LANDSCAPE_ACCOUNT_NAME="${LANDSCAPE_ACCOUNT_NAME:-canonical}"
 LANDSCAPE_PUBLIC_KEY="${LANDSCAPE_PUBLIC_KEY:-}"  # Paste Landscape public key here
 LANDSCAPE_PRIVATE_KEY="${LANDSCAPE_PRIVATE_KEY:-}" # Paste Landscape private key here
@@ -184,6 +184,11 @@ if [ "${MODE}" = "register" ]; then
   log "Running in web registration mode."
 else
   log "Running in production deploy mode."
+
+  if [ -z "${PRE_AUTH_KEY}" ] || [ "${PRE_AUTH_KEY}" = "REPLACE_WITH_HEADSCALE_PREAUTH_KEY" ]; then
+    err "PRE_AUTH_KEY must be set to a valid Headscale pre-auth key in deploy mode."
+    exit 1
+  fi
 fi
 
 prompt_region_if_needed
@@ -466,8 +471,7 @@ TS_UP_CMD=(
   --hostname="${NODE_NAME}"
   --auth-key="${PRE_AUTH_KEY}"
   --accept-dns=false
-  --accept-routes=true
-  --advertise-routes=""
+  --accept-routes=false
   --reset
 )
 
@@ -475,8 +479,9 @@ log "Executing Headscale adoption..."
 if run_cmd "${TS_UP_CMD[@]}" 2>&1; then
   log "Headscale adoption command submitted successfully."
 else
-  warn "tailscale up returned non-zero — node may already be registered or needs manual approval."
-  warn "Check with: tailscale status"
+  err "tailscale up failed. Node was not adopted into Headscale mesh."
+  err "Check with: tailscale status and journalctl -u tailscaled"
+  exit 1
 fi
 
 # Wait for network convergence
