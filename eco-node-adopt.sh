@@ -75,15 +75,17 @@ generate_short_hash() {
 
 generate_node_name() {
   local role="$1"
-  local region="$2"
-  local timestamp
-  local hash
+  local cc="$2"
 
-  timestamp="$(generate_stts_timestamp)"
+  # Timestamp: DDHHMMSSzMMYYYY — all numeric, no separators
+  local timestamp
+  timestamp="$(date -u '+%d%H%M%Sz%m%Y')"
+
+  # Short random hash for collision resistance
+  local hash
   hash="$(generate_short_hash)"
 
-  # Format: role-region-stts-hash
-  echo "${role}-${region}-${timestamp}-${hash}"
+  echo "${role}-${cc}-${timestamp}-${hash}"
 }
 
 validate_role() {

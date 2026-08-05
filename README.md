@@ -5,6 +5,7 @@ Ubuntu bootstrap for registering sovereign edge nodes with Headscale (via Tailsc
 ## Contents
 
 - `eco-headscale-landscape-install.sh`: Main installer with STTS naming, Podman deployment, and Landscape registration
+- `eco-node-adopt.sh`: Minimal role-aware Headscale node adoption script with identity file output
 - `install_headscale_node.sh`: Legacy single-node bootstrap script
 - `ansible/site.yml`: Fleet automation playbook
 - `registration-api/app.js`: Node registration API service for VOGON wallet binding
@@ -48,6 +49,18 @@ One-liner from GitHub raw:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh | sudo bash
+```
+
+Minimal role-aware node adoption:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-node-adopt.sh \
+	| sudo HEADSCALE_URL="https://headscale.tradingnations.cloud" \
+				 PRE_AUTH_KEY="hskey_xxxxxxxx" \
+				 NODE_ROLE="observation" \
+				 NODE_REGION="usvi_atlantic" \
+				 NODE_DATACENTER="hq" \
+				 bash
 ```
 
 With deployment variables:
@@ -180,3 +193,12 @@ headscale_pre_auth_key: "tskey-auth-..."
 - Keep pre-auth and Landscape key material out of source control.
 - Prefer short-lived Headscale pre-auth keys and rotate frequently.
 - Keep `/var/lib/ecosynq/node-registration.json` restricted (`0600`).
+
+## Trust Network Scheme
+
+This project includes a simplified operating model for role-governed, evidentially trustworthy networking:
+
+- `docs/trust-network-scheme.md`: concise architecture and adoption workflow
+- `policies/node-role-policy.json`: default-deny role communication matrix
+
+Use this model to keep Headscale as a controlled identity and connectivity layer for causal evidence analysis.
