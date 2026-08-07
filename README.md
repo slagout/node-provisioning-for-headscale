@@ -1,204 +1,216 @@
-# Node Provisioning for Headscale
+# EcoSynQ Node Provisioning for Headscale
 
-Ubuntu bootstrap for registering sovereign edge nodes with Headscale (via Tailscale), Ubuntu Landscape, and Podman-based EcoSynQ runtime services.
+Role-governed Ubuntu node adoption for a Headscale 0.29.3 evidence network.
+Headscale supplies identity and least-privilege connectivity; application-level
+signatures and receipts establish evidence provenance.
 
-## Contents
+## Security Invariants
 
-- `eco-headscale-landscape-install.sh`: Main installer with STTS naming, Podman deployment, and Landscape registration
-- `eco-node-adopt.sh`: Minimal role-aware Headscale node adoption script with identity file output
-- `install_headscale_node.sh`: Legacy single-node bootstrap script
-- `ansible/site.yml`: Fleet automation playbook
-- `registration-api/app.js`: Node registration API service for VOGON wallet binding
-- `registration-api/public/index.html`: Registration portal page for `register.tradingnations.cloud`
-- `scripts/generate-batch-qr-codes.sh`: Batch QR generation from node CSV
+- Headscale policy is deny-by-default through explicit Grants.
+- Every service node has exactly one canonical role tag.
+- Pre-auth keys are one-use, short-lived, and role-tagged by the issuer.
+- Nodes reject DNS, subnet routes, and exit-node behavior by default.
+- Reenrollment and role changes require explicit operator approval.
+- DERP is an encrypted connectivity fallback, not an evidence observer.
+- Role workloads are deployed separately and expose only required ports.
 
-## STTS Canonical Naming
+Canonical roles:
 
-Installer-generated node names include Spatial, Temporal, Thematic, and Semantic elements:
+- `observation`
+- `causal-inference`
+- `independent-validation`
+- `regional-qsa`
+- `quantumvm`
+- `q-topology`
+- `surrealdb-projection`
+- `immudb-evidence-authority`
+- `checkout-registry`
 
-- Format: `node-<role>-<region>-<ddhhmmmmm>-<sequencer>-<mm>-<yyyy>`
-- Example: `node-witness-usvi-27180650092-9f3a2b1c-50-2026`
+## Repository Layout
 
-## Installer Usage
+- `eco-node-adopt.sh`: hardened role-aware node adoption.
+- `headscale/config.yaml`: Headscale 0.29.3 server baseline.
+- `policies/node-role-policy.json`: enforceable Headscale Grants policy.
+- `scripts/install-headscale-hardening.sh`: transactional server config installer.
+- `ansible/site.yml`: fleet enrollment with role-tag verification.
+- `registration-api/`: authenticated registry with Ed25519 receipts.
+- `docs/derp-hardening.md`: DERP constraints and verification.
+- `docs/trust-network-scheme.md`: evidence-network trust model.
 
-Run directly from the repository:
+## Headscale Server Hardening
 
-```bash
-sudo bash ./eco-headscale-landscape-install.sh
-```
-
-Run register-only mode (generate QR payload URL and pending registration record):
-
-```bash
-sudo bash ./eco-headscale-landscape-install.sh register
-```
-
-Run with dry-run preview (no system changes):
-
-```bash
-sudo bash ./eco-headscale-landscape-install.sh --dry-run
-```
-
-Run safe uninstall mode (removes EcoSynQ containers/network and local audit record only):
-
-```bash
-sudo bash ./eco-headscale-landscape-install.sh --uninstall
-```
-
-One-liner from GitHub raw:
+The supplied policy grants tag ownership to `provisioner@`. Create that
+Headscale user or replace it with the actual provisioning identity:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh | sudo bash
+sudo headscale users create provisioner
 ```
 
-Minimal role-aware node adoption:
+Review `server_url`, `trusted_proxies`, `dns.base_domain`, and DERP settings in
+`headscale/config.yaml`, then install the config and policy transactionally:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-node-adopt.sh \
-	| sudo HEADSCALE_URL="https://headscale.tradingnations.cloud" \
-				 PRE_AUTH_KEY="hskey_xxxxxxxx" \
-				 NODE_ROLE="observation" \
-				 NODE_REGION="usvi_atlantic" \
-				 NODE_DATACENTER="hq" \
-				 bash
+sudo bash scripts/install-headscale-hardening.sh
 ```
 
-With deployment variables:
+The installer backs up current files, runs `headscale configtest`, restarts the
+service, checks health, and restores previous files on failure.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh \
-	| sudo NODE_REGION="usvi" NODE_DATACENTER="charleston" NODE_ROLE="witness" \
-		HEADSCALE_URL="https://headscale.tradingnations.cloud" \
-		PRE_AUTH_KEY="hskey_xxxxxxxx" \
-		LANDSCAPE_SERVER_URL="https://landscape.tradingnations.cloud" \
-		LANDSCAPE_PUBLIC_KEY="$(cat /path/to/landscape.pub)" \
-		LANDSCAPE_PRIVATE_KEY="$(cat /path/to/landscape.pem)" \
-		bash
+sudo headscale --config /etc/headscale/config.yaml configtest
+sudo journalctl -u headscale --since '5 minutes ago'
+sudo headscale nodes list
 ```
 
-Production deployment with deferred wallet binding:
+## DERP and Cloudflare
+
+Cloudflare Tunnel can front the Headscale control endpoint and registration API.
+It must not front a custom DERP server. DERP requires direct public ingress,
+original client source addresses, TCP 80/443, UDP 3478, and ICMP.
+
+The default baseline leaves embedded DERP disabled and retains the public DERP
+map for resilient fallback. Only enable sovereign DERP after direct DNS-only
+ingress is available and external probes pass. See `docs/derp-hardening.md`.
+
+`cloudflare/config.yml.example` tunnels only the Headscale control endpoint and
+registration API to their loopback listeners. Validate and test it before
+installing the service:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/slagout/node-provisioning-for-headscale/main/eco-headscale-landscape-install.sh \
-	| sudo NODE_REGION="austin_tx_usa" NODE_DATACENTER="hq" NODE_ROLE="witness" \
-		HEADSCALE_URL="https://headscale.tradingnations.cloud" \
-		PRE_AUTH_KEY="hskey_xxxxxxxx" \
-		REGISTRATION_URL="https://register.tradingnations.cloud" \
-		bash
+sudo cloudflared tunnel ingress validate
+sudo cloudflared tunnel ingress rule https://headscale.tradingnations.cloud
+sudo cloudflared tunnel ingress rule https://register.tradingnations.cloud
 ```
 
-## Required and Optional Environment Variables
+Do not place an interactive Cloudflare Access policy in front of the Headscale
+control hostname because machine clients cannot complete that challenge. Apply
+Access to the registration hostname, and keep its bearer authentication enabled.
+WebSocket/HTTP upgrade traffic must remain allowed for Headscale. Do not add a
+DERP hostname to this tunnel.
 
-Required:
+## Node Adoption
 
-- `HEADSCALE_URL`: Headscale URL, for example `https://headscale.tradingnations.cloud`
-- `PRE_AUTH_KEY`: Headscale pre-auth key
-
-Optional (recommended for Landscape auto-registration):
-
-- `LANDSCAPE_SERVER_URL`: Landscape server URL
-- `LANDSCAPE_ACCOUNT_NAME`: Landscape account name
-- `LANDSCAPE_PUBLIC_KEY`: Landscape public key content
-- `LANDSCAPE_PRIVATE_KEY`: Landscape private key content
-
-Optional STTS metadata:
-
-- `NODE_REGION`: Spatial region code, default `usvi`
-- `NODE_DATACENTER`: Spatial facility code, default `charleston`
-- `NODE_ROLE`: Semantic role, default `witness`
-- `NODE_SEQUENCER`: Thematic sequencer value or `auto`
-
-Registration variables:
-
-- `REGISTRATION_URL`: Registration portal base URL, default `https://register.tradingnations.cloud`
-- `VOGON_ID`: Optional wallet identity during deploy. If omitted, binding is deferred.
-
-Cloudflare routing note:
-
-- Ensure the public hostnames are routed through your tunnel to the correct origin services before provisioning:
-	- `headscale.tradingnations.cloud` -> `https://headscale.ecosynq.local:8443`
-	- `landscape.tradingnations.cloud` -> `https://landscape.ecosynq.local:4443`
-	- `register.tradingnations.cloud` -> your registration API origin
-
-## Registration API and Portal
-
-The repository includes a minimal production starter API + portal under `registration-api`.
-
-Run locally:
+Use a root-readable secret file instead of placing a pre-auth key in shell
+history:
 
 ```bash
-cd registration-api
-npm install
-npm start
+sudo install -m 0600 /dev/null /run/ecosynq-preauth-key
+sudoedit /run/ecosynq-preauth-key
+
+sudo env \
+  HEADSCALE_URL="https://headscale.tradingnations.cloud" \
+  PRE_AUTH_KEY_FILE="/run/ecosynq-preauth-key" \
+  NODE_ROLE="observation" \
+  NODE_REGION="Virgin Islands (U.S.) (VI)" \
+  NODE_REGION_CODE="VI" \
+  NODE_DATACENTER="hq" \
+  bash ./eco-node-adopt.sh
 ```
 
-The service hosts:
-
-- `POST /api/register-node`: Register node-to-wallet binding with idempotent duplicate handling
-- `GET /api/node/:node_name`: Verify a specific node binding
-- `GET /api/nodes`: List all registered nodes (secure this endpoint in production)
-- `/`: Static registration portal page
-
-Default registry location:
-
-- `/var/lib/ecosynq/node-registry.json`
-
-Override with:
+For an external provisioning service:
 
 ```bash
-REGISTRY_FILE=/custom/path/node-registry.json npm start
+sudo install -m 0600 /dev/null /run/ecosynq-provisioning-token
+sudoedit /run/ecosynq-provisioning-token
+
+sudo env \
+  HEADSCALE_URL="https://headscale.tradingnations.cloud" \
+  PROVISIONING_API_URL="https://provisioning.tradingnations.cloud" \
+  PROVISIONING_API_TOKEN_FILE="/run/ecosynq-provisioning-token" \
+  NODE_ROLE="observation" \
+  NODE_REGION="Virgin Islands (U.S.) (VI)" \
+  NODE_REGION_CODE="VI" \
+  bash ./eco-node-adopt.sh
 ```
 
-## Batch QR Generation
+The default provisioning endpoint is `POST /api/key/generate`. It receives the
+role, region, datacenter, `reusable: false`, and `expiration_seconds: 3600`, and
+must return a nonempty `pre_auth_key` or `auth_key`. Override only the URL path
+with `PROVISIONING_API_KEY_PATH`.
 
-Use `scripts/generate-batch-qr-codes.sh` with a CSV file:
+Interactive selection reads from `/dev/tty`, so it works when the script itself
+is streamed. Downloading and reviewing a pinned revision before execution is
+still preferred over executing mutable remote content.
 
-```bash
-chmod +x scripts/generate-batch-qr-codes.sh
-scripts/generate-batch-qr-codes.sh node-list.csv
-```
+An existing matching identity is reused. The script refuses silent identity or
+role replacement. `ALLOW_REENROLL=true` is a break-glass control and must be
+used only after decommission approval.
 
-CSV format:
+## Ansible Enrollment
 
-```csv
-region,datacenter,role,node_name
-austin_tx_usa,hq,witness,node-witness-austin_tx_usa-27180650092-a1b2c3d4-07-2026
-```
-
-## Uninstall Behavior
-
-Safe uninstall mode intentionally preserves:
-
-- Installed packages (`podman`, `tailscale`, `landscape-client`)
-- Podman volumes (`immudb-data`, `postgres-data`, `redis-data`)
-- Remote registrations (Headscale and Landscape)
-
-It removes:
-
-- Containers `ecosynq-immudb`, `ecosynq-postgres`, `ecosynq-redis`
-- Podman network `ecosynq` (if removable)
-- Local audit file `/var/lib/ecosynq/node-registration.json`
-
-## Ansible Variables
-
-Define at inventory/group_vars level:
+Define these values in encrypted inventory or Ansible Vault:
 
 ```yaml
-headscale_server_url: "https://headscale.example.local"
-headscale_pre_auth_key: "tskey-auth-..."
+headscale_server_url: "https://headscale.tradingnations.cloud"
+headscale_pre_auth_key: "one-use-role-tagged-key"
+ecosynq_node_name: "observation-vi-06143000z082026-a1b2"
+ecosynq_node_role: "observation"
 ```
 
-## Security Notes
+The playbook suppresses secret-bearing task output and fails unless the expected
+role tag is effective after enrollment.
 
-- Keep pre-auth and Landscape key material out of source control.
-- Prefer short-lived Headscale pre-auth keys and rotate frequently.
-- Keep `/var/lib/ecosynq/node-registration.json` restricted (`0600`).
+## Registration API
 
-## Trust Network Scheme
+The API binds to `127.0.0.1:3000`, requires a bearer token for protected API
+operations, limits body size and request rate, validates canonical roles, and
+persists version 2.0 records atomically with mode `0600`. Every receipt is signed
+with Ed25519 and verified at startup.
 
-This project includes a simplified operating model for role-governed, evidentially trustworthy networking:
+Generate credentials without printing them:
 
-- `docs/trust-network-scheme.md`: concise architecture and adoption workflow
-- `policies/node-role-policy.json`: default-deny role communication matrix
+```bash
+sudo install -d -m 0700 /etc/ecosynq
+sudo sh -c 'openssl rand -hex 32 > /etc/ecosynq/registration-api-token'
+sudo openssl genpkey -algorithm Ed25519 \
+  -out /etc/ecosynq/registration-signing-key.pem
+sudo chmod 0400 \
+  /etc/ecosynq/registration-api-token \
+  /etc/ecosynq/registration-signing-key.pem
+```
 
-Use this model to keep Headscale as a controlled identity and connectivity layer for causal evidence analysis.
+Deploy the API to `/opt/ecosynq-registration-api`, install production
+dependencies under Node.js 22 from the lockfile with lifecycle scripts disabled,
+and install the sandboxed unit:
+
+```bash
+cd /opt/ecosynq-registration-api
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+sudo install -m 0644 ecosynq-registration-api.service \
+  /etc/systemd/system/ecosynq-registration-api.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ecosynq-registration-api
+```
+
+Place Cloudflare Access in front of the tunnel in addition to the bearer token.
+Tunnel only to `http://127.0.0.1:3000`.
+
+Endpoints:
+
+- `GET /healthz`: unauthenticated liveness only.
+- `GET /api/public-key`: Ed25519 verification key and fingerprint.
+- `POST /api/register-node`: authenticated registration.
+- `GET /api/node/:node_name`: authenticated receipt lookup.
+- `GET /api/nodes`: authenticated sanitized inventory.
+
+Version 1.0 registry files are intentionally rejected because their hashes were
+not independently verifiable. Archive them and re-register through version 2.0.
+
+## Role Workloads
+
+Node adoption no longer deploys generic immuDB, PostgreSQL, or Redis containers.
+That behavior exposed every database on every role and used placeholder
+credentials. Deploy each role workload separately with pinned image digests,
+read-only filesystems where possible, systemd supervision, secret files, and
+host bindings restricted to the node's Tailscale address.
+
+## Local Validation
+
+```bash
+bash scripts/validate-hardening.sh
+
+cd registration-api
+npm ci --ignore-scripts --no-audit --no-fund
+npm audit --omit=dev --audit-level=moderate
+npm test
+```

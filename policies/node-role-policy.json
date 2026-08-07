@@ -1,0 +1,57 @@
+{
+  "tagOwners": {
+    "tag:observation": ["provisioner@"],
+    "tag:causal-inference": ["provisioner@"],
+    "tag:independent-validation": ["provisioner@"],
+    "tag:regional-qsa": ["provisioner@"],
+    "tag:quantumvm": ["provisioner@"],
+    "tag:q-topology": ["provisioner@"],
+    "tag:surrealdb-projection": ["provisioner@"],
+    "tag:immudb-evidence-authority": ["provisioner@"],
+    "tag:checkout-registry": ["provisioner@"]
+  },
+  "grants": [
+    {
+      "src": ["tag:observation"],
+      "dst": ["tag:regional-qsa"],
+      "ip": ["tcp:443"]
+    },
+    {
+      "src": ["tag:regional-qsa"],
+      "dst": ["tag:causal-inference"],
+      "ip": ["tcp:443"]
+    },
+    {
+      "src": ["tag:causal-inference"],
+      "dst": ["tag:surrealdb-projection"],
+      "ip": ["tcp:443", "tcp:8000"]
+    },
+    {
+      "src": ["tag:causal-inference"],
+      "dst": ["tag:immudb-evidence-authority"],
+      "ip": ["tcp:443", "tcp:3322"]
+    },
+    {
+      "src": ["tag:independent-validation"],
+      "dst": ["tag:immudb-evidence-authority"],
+      "ip": ["tcp:443", "tcp:3322"]
+    },
+    {
+      "src": ["tag:q-topology"],
+      "dst": ["tag:regional-qsa"],
+      "ip": ["tcp:443"]
+    },
+    {
+      "src": ["tag:quantumvm"],
+      "dst": ["tag:causal-inference"],
+      "ip": ["tcp:443"]
+    },
+    {
+      "src": ["tag:checkout-registry"],
+      "dst": ["tag:immudb-evidence-authority"],
+      "ip": ["tcp:443", "tcp:3322"]
+    }
+  ],
+  "ssh": [],
+  "randomizeClientPort": true
+}

@@ -4,9 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EcoSynQ Node Registration</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
       --ink: #111827;
@@ -24,7 +21,7 @@
 
     body {
       margin: 0;
-      font-family: "Space Grotesk", sans-serif;
+      font-family: Aptos, "Segoe UI", sans-serif;
       color: var(--ink);
       background:
         radial-gradient(1000px 500px at -10% -10%, #99f6e4 0%, transparent 60%),
@@ -115,7 +112,7 @@
     }
 
     .mono {
-      font-family: "IBM Plex Mono", monospace;
+      font-family: "Cascadia Mono", Consolas, monospace;
       font-size: 0.86rem;
     }
 
@@ -218,12 +215,17 @@
         <div class="meta">Format: b58:&lt;base58 string&gt; (min length 20 after prefix)</div>
       </div>
 
+      <div>
+        <label for="access-token">Registration Access Token</label>
+        <input id="access-token" class="mono" type="password" autocomplete="off" required>
+      </div>
+
       <button id="submit-btn" type="button">Register Node to Wallet</button>
       <div id="status" class="status"></div>
     </section>
 
     <footer class="footer">
-      Registrations are anchored as immutable proofs. Need help: support@ecosynq.cloud
+      Successful submissions receive a server-signed registration receipt.
     </footer>
   </main>
 
@@ -233,13 +235,14 @@
       node_name: params.get('node_name') || '',
       region: params.get('region') || '',
       datacenter: params.get('datacenter') || '',
-      role: params.get('role') || 'witness',
+      role: params.get('role') || '',
       vogon_id: params.get('vogon_id') || ''
     };
 
     const nodeNameInput = document.getElementById('node-name');
     const regionInput = document.getElementById('region');
     const vogonInput = document.getElementById('vogon-id');
+    const accessTokenInput = document.getElementById('access-token');
     const prefill = document.getElementById('prefill');
     const status = document.getElementById('status');
     const submitBtn = document.getElementById('submit-btn');
@@ -263,15 +266,16 @@
     }
 
     function validVogon(vogonId) {
-      return /^b58:[a-zA-Z0-9]{20,}$/.test(vogonId);
+      return /^b58:[1-9A-HJ-NP-Za-km-z]{20,128}$/.test(vogonId);
     }
 
     submitBtn.addEventListener('click', async () => {
       const region = regionInput.value.trim();
       const node_name = nodeNameInput.value.trim();
       const vogon_id = vogonInput.value.trim();
+      const accessToken = accessTokenInput.value;
 
-      if (!region || !node_name || !vogon_id) {
+      if (!region || !node_name || !vogon_id || !accessToken) {
         showStatus('Please complete all required fields.', 'err');
         return;
       }
@@ -286,14 +290,16 @@
       try {
         const response = await fetch('/api/register-node', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
           body: JSON.stringify({
             node_name,
             region,
             datacenter: payload.datacenter || 'unknown',
-            role: payload.role || 'witness',
-            vogon_id,
-            timestamp: new Date().toISOString()
+            role: payload.role,
+            vogon_id
           })
         });
 

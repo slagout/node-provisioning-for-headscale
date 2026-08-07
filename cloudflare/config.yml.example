@@ -1,0 +1,13 @@
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+originRequest:
+  connectTimeout: 10s
+  tcpKeepAlive: 30s
+
+ingress:
+  - hostname: headscale.tradingnations.cloud
+    service: http://127.0.0.1:8080
+  - hostname: register.tradingnations.cloud
+    service: http://127.0.0.1:3000
+  - service: http_status:404

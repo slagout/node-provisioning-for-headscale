@@ -4,18 +4,42 @@
   become: true
   vars:
     tailscale_channel: stable
+    tailscale_up_argv:
+      - tailscale
+      - up
+      - "--login-server={{ headscale_server_url }}"
+      - "--hostname={{ ecosynq_node_name }}"
+      - --accept-dns=false
+      - --accept-routes=false
+      - --advertise-exit-node=false
+      - "--advertise-tags=tag:{{ ecosynq_node_role }}"
+    ecosynq_valid_roles:
+      - observation
+      - causal-inference
+      - independent-validation
+      - regional-qsa
+      - quantumvm
+      - q-topology
+      - surrealdb-projection
+      - immudb-evidence-authority
+      - checkout-registry
+
+  pre_tasks:
+    - name: Validate governed node identity inputs
+      ansible.builtin.assert:
+        that:
+          - headscale_server_url is match('^https://')
+          - ecosynq_node_name is match('^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$')
+          - ecosynq_node_role in ecosynq_valid_roles
+        fail_msg: >-
+          Define an HTTPS Headscale URL, control-plane-assigned
+          ecosynq_node_name, and canonical ecosynq_node_role.
+      no_log: true
 
   tasks:
-    - name: Generate unique UTC hostname with milliseconds
-      ansible.builtin.shell: >
-        echo node-$(date -u +%d%H%M%S%3Nz)-$(date -u +%b | tr '[:upper:]' '[:lower:]')-$(date -u +%Y)
-      register: generated_hostname
-      changed_when: false
-
     - name: Install dependencies
       ansible.builtin.apt:
         name:
-          - curl
           - ca-certificates
           - gnupg
           - jq
@@ -26,6 +50,7 @@
       ansible.builtin.get_url:
         url: "https://pkgs.tailscale.com/{{ tailscale_channel }}/ubuntu/noble.noarmor.gpg"
         dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        checksum: "sha256:3e03dacf222698c60b8e2f990b809ca1b3e104de127767864284e6c228f1fb39"
         mode: "0644"
 
     - name: Add tailscale repository
@@ -47,19 +72,61 @@
         enabled: true
         state: started
 
-    - name: Register node in Headscale
-      ansible.builtin.command: >
-        tailscale up
-        --login-server={{ headscale_server_url }}
-        --hostname={{ generated_hostname.stdout }}
-        --accept-dns=false
-        --accept-routes=false
-        --advertise-exit-node=false
-        --reset
+    - name: Inspect current Tailscale identity
+      ansible.builtin.command: tailscale status --json
+      register: tailscale_current
+      changed_when: false
+      failed_when: false
+
+    - name: Parse current Tailscale identity
+      ansible.builtin.set_fact:
+        tailscale_current_status: >-
+          {{ (tailscale_current.stdout | from_json)
+             if (tailscale_current.rc == 0 and tailscale_current.stdout | trim | length > 0)
+             else {} }}
+        tailscale_current_self: >-
+          {{ ((tailscale_current.stdout | from_json).Self | default({}))
+             if (tailscale_current.rc == 0 and tailscale_current.stdout | trim | length > 0)
+             else {} }}
+
+    - name: Refuse an existing mismatched identity
+      ansible.builtin.assert:
+        that:
+          - >-
+            tailscale_current_self.ID | default('') | length == 0 or
+            (tailscale_current_self.HostName | default(tailscale_current_self.DNSName | default(''))).split('.')[0]
+            == ecosynq_node_name
+          - >-
+            tailscale_current_self.ID | default('') | length == 0 or
+            'tag:' ~ ecosynq_node_role in (tailscale_current_self.Tags | default([]))
+        fail_msg: >-
+          Existing Tailscale identity does not match the governed hostname and role.
+          Decommission it explicitly before enrollment.
+
+    - name: Require a one-use key for fresh enrollment
+      ansible.builtin.assert:
+        that:
+          - headscale_pre_auth_key | default('') | length > 0
+        fail_msg: "Fresh enrollment requires headscale_pre_auth_key from Ansible Vault."
+      when: tailscale_current_self.ID | default('') | length == 0
+      no_log: true
+
+    - name: Register a fresh node in Headscale
+      ansible.builtin.command:
+        argv: "{{ tailscale_up_argv }}"
       environment:
         TS_AUTHKEY: "{{ headscale_pre_auth_key }}"
-      register: tailscale_up
       changed_when: true
+      when: tailscale_current_self.ID | default('') | length == 0
+      no_log: true
+
+    - name: Reconnect a matching offline node
+      ansible.builtin.command:
+        argv: "{{ tailscale_up_argv }}"
+      changed_when: true
+      when:
+        - tailscale_current_self.ID | default('') | length > 0
+        - not (tailscale_current_self.Online | default(false) | bool)
 
     - name: Wait until online
       ansible.builtin.command: tailscale status --json
@@ -67,15 +134,32 @@
       retries: 20
       delay: 2
       until: (ts_status.stdout | from_json).Self.Online | default(false) | bool
+      changed_when: false
+
+    - name: Verify effective Headscale role tag
+      ansible.builtin.assert:
+        that:
+          - "'tag:' ~ ecosynq_node_role in ((ts_status.stdout | from_json).Self.Tags | default([]))"
+        fail_msg: "Headscale did not authorize the required role tag."
+
+    - name: Create protected EcoSynQ state directory
+      ansible.builtin.file:
+        path: /var/lib/ecosynq
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
 
     - name: Persist registration record
       ansible.builtin.copy:
-        dest: "/var/lib/ecosynq/node-registration-{{ generated_hostname.stdout }}.json"
+        dest: "/var/lib/ecosynq/node-registration-{{ ecosynq_node_name }}.json"
         mode: "0600"
         content: |
           {
-            "hostname": "{{ generated_hostname.stdout }}",
+            "hostname": "{{ ecosynq_node_name }}",
+            "role": "{{ ecosynq_node_role }}",
+            "effective_tags": {{ (ts_status.stdout | from_json).Self.Tags | default([]) | to_json }},
             "server_url": "{{ headscale_server_url }}",
             "registered_at": "{{ ansible_date_time.iso8601 }}",
-            "status": "active"
+            "status": "unsigned-local-record"
           }
