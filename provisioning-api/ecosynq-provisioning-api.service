@@ -1,0 +1,43 @@
+[Unit]
+Description=EcoSynQ Node Provisioning API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ecosynq-provisioning
+Group=ecosynq-provisioning
+WorkingDirectory=/opt/ecosynq-provisioning-api
+ExecStart=/usr/bin/node /opt/ecosynq-provisioning-api/app.js
+Environment=NODE_ENV=production
+Environment=PORT=8080
+Environment=HOST=127.0.0.1
+Environment=USERS_FILE=/var/lib/ecosynq/provisioning-users.json
+Environment=BOOTSTRAP_TOKENS_FILE=/var/lib/ecosynq/bootstrap-tokens.json
+Environment=SESSION_SECRET_FILE=/etc/ecosynq/provisioning-session-secret
+Environment=HEADSCALE_ADOPTION_USER=provisioner
+Environment=HEADSCALE_URL=https://headscale.tradingnations.cloud
+Environment=PORTAL_BASE_URL=https://provisioning.tradingnations.cloud
+# HEADSCALE_CLI_ADDRESS / HEADSCALE_CLI_API_KEY authorize the local `headscale`
+# binary to reach the control-plane host over the existing gRPC tunnel; set
+# them in an EnvironmentFile so the API key is never stored in this unit file.
+EnvironmentFile=-/etc/ecosynq/provisioning-api.env
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ecosynq
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

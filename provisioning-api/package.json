@@ -1,0 +1,19 @@
+{
+  "name": "ecosynq-provisioning-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Login-gated node adoption portal: issues one-time bootstrap tokens and pre-auth keys",
+  "main": "app.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node app.js",
+    "create-user": "node scripts/create-user.js",
+    "test": "node ../tests/provisioning-api-test.js"
+  },
+  "dependencies": {
+    "express": "4.22.2"
+  },
+  "overrides": {
+    "path-to-regexp": "0.1.13"
+  }
+}

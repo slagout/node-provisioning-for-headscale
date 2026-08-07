@@ -32,7 +32,9 @@ Canonical roles:
 - `headscale/config.yaml`: Headscale 0.29.3 server baseline.
 - `policies/node-role-policy.json`: enforceable Headscale Grants policy.
 - `scripts/install-headscale-hardening.sh`: transactional server config installer.
+- `scripts/local-provisioning-smoke.sh`: self-contained local test of the whole login-to-adoption flow.
 - `ansible/site.yml`: fleet enrollment with role-tag verification.
+- `provisioning-api/`: login-gated portal that issues one-time node install commands.
 - `registration-api/`: authenticated registry with Ed25519 receipts.
 - `docs/derp-hardening.md`: DERP constraints and verification.
 - `docs/trust-network-scheme.md`: evidence-network trust model.
@@ -87,6 +89,63 @@ control hostname because machine clients cannot complete that challenge. Apply
 Access to the registration hostname, and keep its bearer authentication enabled.
 WebSocket/HTTP upgrade traffic must remain allowed for Headscale. Do not add a
 DERP hostname to this tunnel.
+
+## Simplified Rollout: Provisioning Portal
+
+For day-to-day node onboarding, a node owner does not need to know Headscale
+concepts, pre-auth keys, or CLI flags. The `provisioning-api` app is a small,
+login-gated portal that turns adoption into three steps:
+
+1. The node owner signs in at the portal with an admin-issued username and
+   temporary password.
+2. They pick the node's region and role from two dropdowns and click
+   **Generate Install Command**.
+3. They paste the resulting one-line `curl | sudo env ... bash` command into
+   their Ubuntu Server node. Everything after that (dependency install,
+   Headscale enrollment, verification) proceeds automatically via the
+   existing `eco-node-adopt.sh` script, unchanged.
+
+The generated command is single-use and expires quickly. The portal issues a
+short-lived bootstrap token (not a shared, long-lived secret) that is bound to
+the chosen role/region and is consumed the first time `eco-node-adopt.sh` calls
+back to `POST /api/key/generate` &mdash; the exact `PROVISIONING_API_URL` /
+`PROVISIONING_API_TOKEN` contract the script already supports. On redemption,
+the portal shells out to the `headscale` CLI to mint a real, non-reusable,
+3600-second pre-auth key tagged with the chosen role, so Headscale remains the
+source of truth for adoption and tag ownership.
+
+Admin setup:
+
+```bash
+sudo install -d -m 0700 /etc/ecosynq /var/lib/ecosynq
+sudo sh -c 'openssl rand -hex 32 > /etc/ecosynq/provisioning-session-secret'
+sudo chmod 0400 /etc/ecosynq/provisioning-session-secret
+
+cd /opt/ecosynq-provisioning-api
+npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+USERS_FILE=/var/lib/ecosynq/provisioning-users.json \
+  node scripts/create-user.js <node-owner-username> --expires-in-hours 24
+
+sudo install -m 0644 ecosynq-provisioning-api.service \
+  /etc/systemd/system/ecosynq-provisioning-api.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now ecosynq-provisioning-api
+```
+
+The portal calls the local `headscale` binary, so the provisioning host needs
+the remote-CLI setup described in [Headscale's gRPC API
+docs](https://headscale.net/stable/ref/api/#grpc): an API key from
+`headscale apikeys create` and `HEADSCALE_CLI_ADDRESS` /
+`HEADSCALE_CLI_API_KEY` set in `/etc/ecosynq/provisioning-api.env` (referenced
+by the systemd unit), reaching the control-plane host's gRPC port. `GET
+/readyz` reports whether that path is currently working.
+
+Test the whole flow locally, with no production servers and no sudo, using a
+real throwaway Headscale instance:
+
+```bash
+bash scripts/local-provisioning-smoke.sh
+```
 
 ## Node Adoption
 
@@ -210,6 +269,11 @@ host bindings restricted to the node's Tailscale address.
 bash scripts/validate-hardening.sh
 
 cd registration-api
+npm ci --ignore-scripts --no-audit --no-fund
+npm audit --omit=dev --audit-level=moderate
+npm test
+
+cd ../provisioning-api
 npm ci --ignore-scripts --no-audit --no-fund
 npm audit --omit=dev --audit-level=moderate
 npm test

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoSynQ Node Adoption &mdash; Sign In</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <h1>EcoSynQ Node Adoption</h1>
+      <p>Sign in with your assigned username and temporary password.</p>
+    </header>
+
+    <section class="content">
+      <div>
+        <label for="username">Username</label>
+        <input id="username" type="text" autocomplete="username" required>
+      </div>
+
+      <div>
+        <label for="password">Temporary Password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+      </div>
+
+      <button id="login-btn" type="button">Sign In</button>
+      <div id="status" class="status"></div>
+    </section>
+
+    <footer class="footer">
+      After signing in, choose a region and role to receive a one-time install command.
+    </footer>
+  </main>
+
+  <script>
+    const usernameInput = document.getElementById('username');
+    const passwordInput = document.getElementById('password');
+    const loginBtn = document.getElementById('login-btn');
+    const status = document.getElementById('status');
+
+    function showStatus(message, type) {
+      status.className = `status ${type === 'ok' ? 'ok' : 'err'}`;
+      status.textContent = message;
+    }
+
+    async function submitLogin() {
+      const username = usernameInput.value.trim();
+      const password = passwordInput.value;
+      if (!username || !password) {
+        showStatus('Enter your username and password.', 'err');
+        return;
+      }
+
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Signing in...';
+      try {
+        const response = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showStatus(result.error || 'Sign in failed.', 'err');
+          return;
+        }
+        window.location.href = '/portal.html';
+      } catch {
+        showStatus('Network error while signing in.', 'err');
+      } finally {
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Sign In';
+      }
+    }
+
+    loginBtn.addEventListener('click', submitLogin);
+    passwordInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        submitLogin();
+      }
+    });
+  </script>
+</body>
+</html>

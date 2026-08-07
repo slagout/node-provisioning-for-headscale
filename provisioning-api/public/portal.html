@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EcoSynQ Node Adoption &mdash; Get Install Command</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <h1>Adopt a New Node</h1>
+      <p>Select the node's region and role, then run the generated command on the Ubuntu node.</p>
+    </header>
+
+    <section class="content">
+      <div>
+        <label for="region">Node Region</label>
+        <select id="region" required></select>
+      </div>
+
+      <div>
+        <label for="role">Node Role</label>
+        <select id="role" required></select>
+      </div>
+
+      <button id="generate-btn" type="button">Generate Install Command</button>
+      <div id="status" class="status"></div>
+
+      <div id="result" style="display:none">
+        <label for="curl-command">Run this on the new Ubuntu node (one-time use, expires quickly):</label>
+        <textarea id="curl-command" class="mono" rows="4" readonly></textarea>
+        <button id="copy-btn" type="button">Copy Command</button>
+        <div class="meta" id="expiry-meta"></div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <button id="logout-btn" type="button" class="link-btn">Sign out</button>
+    </footer>
+  </main>
+
+  <script>
+    const regionSelect = document.getElementById('region');
+    const roleSelect = document.getElementById('role');
+    const generateBtn = document.getElementById('generate-btn');
+    const status = document.getElementById('status');
+    const result = document.getElementById('result');
+    const curlCommand = document.getElementById('curl-command');
+    const copyBtn = document.getElementById('copy-btn');
+    const expiryMeta = document.getElementById('expiry-meta');
+    const logoutBtn = document.getElementById('logout-btn');
+
+    function showStatus(message, type) {
+      status.className = `status ${type === 'ok' ? 'ok' : 'err'}`;
+      status.textContent = message;
+    }
+
+    async function init() {
+      const sessionResponse = await fetch('/api/session');
+      if (!sessionResponse.ok) {
+        window.location.href = '/login.html';
+        return;
+      }
+
+      const catalogResponse = await fetch('/api/catalog');
+      if (!catalogResponse.ok) {
+        showStatus('Failed to load region/role catalog.', 'err');
+        return;
+      }
+      const catalog = await catalogResponse.json();
+
+      for (const region of catalog.regions) {
+        const option = document.createElement('option');
+        option.value = region;
+        option.textContent = region;
+        regionSelect.appendChild(option);
+      }
+      for (const role of catalog.roles) {
+        const option = document.createElement('option');
+        option.value = role;
+        option.textContent = role;
+        roleSelect.appendChild(option);
+      }
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      const region = regionSelect.value;
+      const role = roleSelect.value;
+      if (!region || !role) {
+        showStatus('Select a region and role.', 'err');
+        return;
+      }
+
+      generateBtn.disabled = true;
+      generateBtn.textContent = 'Generating...';
+      try {
+        const response = await fetch('/api/bootstrap', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ region, role })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showStatus(body.error || 'Failed to generate install command.', 'err');
+          return;
+        }
+        curlCommand.value = body.curl_command;
+        expiryMeta.textContent = `This command expires at ${body.expires_at} and can only be used once.`;
+        result.style.display = 'block';
+        showStatus('Install command ready.', 'ok');
+      } catch {
+        showStatus('Network error while generating install command.', 'err');
+      } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate Install Command';
+      }
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(curlCommand.value);
+      copyBtn.textContent = 'Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy Command'; }, 1500);
+    });
+
+    logoutBtn.addEventListener('click', async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    });
+
+    init();
+  </script>
+</body>
+</html>

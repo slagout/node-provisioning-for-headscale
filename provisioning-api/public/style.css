@@ -1,0 +1,79 @@
+:root {
+  --ink: #111827;
+  --slate: #334155;
+  --accent: #0f766e;
+  --danger: #b91c1c;
+  --ok: #047857;
+  --panel: rgba(255, 255, 255, 0.88);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: Aptos, "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1000px 500px at -10% -10%, #99f6e4 0%, transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, #fed7aa 0%, transparent 55%),
+    linear-gradient(160deg, #ecfeff, #fff7ed 60%, #f8fafc);
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.shell {
+  width: min(640px, 100%);
+  background: var(--panel);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 14px 32px rgba(2, 8, 20, 0.12);
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+.hero {
+  padding: 24px 28px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(120deg, rgba(15, 118, 110, 0.10), rgba(234, 88, 12, 0.08));
+}
+
+.hero h1 { margin: 0 0 6px; font-size: clamp(1.3rem, 2.8vw, 1.8rem); }
+.hero p { margin: 0; color: var(--slate); font-size: 0.96rem; }
+
+.content { padding: 24px 28px 28px; display: grid; gap: 14px; }
+
+label { display: block; margin-bottom: 6px; font-size: 0.9rem; color: #1e293b; font-weight: 600; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  font: inherit;
+  background: white;
+  color: #0f172a;
+}
+
+.mono { font-family: "Cascadia Mono", Consolas, monospace; font-size: 0.86rem; }
+.meta { font-size: 0.82rem; color: #64748b; margin-top: 5px; }
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  color: white;
+  background: linear-gradient(120deg, #0f766e, #0ea5a4);
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+.link-btn { background: none; color: var(--slate); font-weight: 500; padding: 4px; }
+
+.status { border-radius: 10px; padding: 10px 12px; font-size: 0.92rem; display: none; }
+.status.ok { display: block; color: var(--ok); background: #ecfdf5; border: 1px solid #6ee7b7; }
+.status.err { display: block; color: var(--danger); background: #fef2f2; border: 1px solid #fca5a5; }
+
+.footer { padding: 0 28px 20px; color: #64748b; font-size: 0.82rem; }

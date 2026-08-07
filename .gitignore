@@ -9,5 +9,7 @@
 .vscode/
 node_modules/
 registration-api/node_modules/
+provisioning-api/node_modules/
 qr-codes/
 *.png
+__pycache__/
