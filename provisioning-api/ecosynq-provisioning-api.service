@@ -5,39 +5,55 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ecosynq-provisioning
-Group=ecosynq-provisioning
+DynamicUser=yes
 WorkingDirectory=/opt/ecosynq-provisioning-api
-ExecStart=/usr/bin/node /opt/ecosynq-provisioning-api/app.js
+ExecStart=/usr/bin/node app.js
 Environment=NODE_ENV=production
-Environment=PORT=8080
 Environment=HOST=127.0.0.1
+Environment=PORT=8080
 Environment=USERS_FILE=/var/lib/ecosynq/provisioning-users.json
 Environment=BOOTSTRAP_TOKENS_FILE=/var/lib/ecosynq/bootstrap-tokens.json
-Environment=SESSION_SECRET_FILE=/etc/ecosynq/provisioning-session-secret
+Environment=SESSION_SECRET_FILE=%d/provisioning-session-secret
 Environment=HEADSCALE_ADOPTION_USER=provisioner
 Environment=HEADSCALE_URL=https://headscale.tradingnations.cloud
 Environment=PORTAL_BASE_URL=https://provisioning.tradingnations.cloud
+Environment=INSTALL_SCRIPT_PATH=/opt/ecosynq-provisioning-api/eco-node-adopt.sh
+LoadCredential=provisioning-session-secret:/etc/ecosynq/provisioning-session-secret
 # HEADSCALE_CLI_ADDRESS / HEADSCALE_CLI_API_KEY authorize the local `headscale`
 # binary to reach the control-plane host over the existing gRPC tunnel; set
 # them in an EnvironmentFile so the API key is never stored in this unit file.
 EnvironmentFile=-/etc/ecosynq/provisioning-api.env
+StateDirectory=ecosynq
+StateDirectoryMode=0700
+UMask=0077
 Restart=on-failure
-RestartSec=3
-NoNewPrivileges=true
+RestartSec=5s
+
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
 ProtectSystem=strict
-ProtectHome=true
-PrivateTmp=true
+ProcSubset=pid
 ReadWritePaths=/var/lib/ecosynq
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictSUIDSGID=true
-RestrictRealtime=true
-LockPersonality=true
-MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+SocketBindAllow=tcp:8080
+SocketBindDeny=any
 
 [Install]
 WantedBy=multi-user.target

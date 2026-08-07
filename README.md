@@ -32,12 +32,46 @@ Canonical roles:
 - `headscale/config.yaml`: Headscale 0.29.3 server baseline.
 - `policies/node-role-policy.json`: enforceable Headscale Grants policy.
 - `scripts/install-headscale-hardening.sh`: transactional server config installer.
+- `scripts/deploy-headscale-server.sh`: one-shot Headscale host deployment (pulls this repo, applies hardening, issues remote-CLI API key).
+- `scripts/deploy-provisioning-server.sh`: one-shot provisioning host deployment (pulls this repo, installs both APIs, provisions secrets, starts services).
 - `scripts/local-provisioning-smoke.sh`: self-contained local test of the whole login-to-adoption flow.
 - `ansible/site.yml`: fleet enrollment with role-tag verification.
 - `provisioning-api/`: login-gated portal that issues one-time node install commands.
 - `registration-api/`: authenticated registry with Ed25519 receipts.
 - `docs/derp-hardening.md`: DERP constraints and verification.
 - `docs/trust-network-scheme.md`: evidence-network trust model.
+
+## Production Deployment
+
+Two scripts turn a fresh checkout into a running node acquisition/adoption
+workflow across the two hosts described in the architecture. Both are
+interactive (they prompt with sensible defaults) but read every value from the
+environment first, so they also run unattended in CI.
+
+On the **Headscale control-plane host** (Headscale already installed):
+
+```bash
+sudo bash scripts/deploy-headscale-server.sh
+```
+
+This clones/updates the repo, applies the hardened config and policy (via
+`install-headscale-hardening.sh`), ensures the `provisioner` user exists, and
+issues a one-time remote-CLI API key if none exists yet.
+
+On the **provisioning host**:
+
+```bash
+sudo bash scripts/deploy-provisioning-server.sh
+```
+
+This clones/updates the repo, deploys `registration-api` and `provisioning-api`
+to `/opt`, generates any missing secrets (registration token, Ed25519 signing
+key, portal session secret), installs both systemd units, and starts both
+services. It prints the remaining manual step: copying the API key from the
+Headscale host's script output into `/etc/ecosynq/provisioning-api.env`.
+
+Each script is a thin, idempotent wrapper around the manual steps documented
+below; re-running either one is safe and picks up a newer `REPO_REF`.
 
 ## Headscale Server Hardening
 
