@@ -61,6 +61,25 @@ fi
 echo "== Applying hardened Headscale config and policy =="
 bash "${SRC_DIR}/scripts/install-headscale-hardening.sh"
 
+wait_for_headscale_ready() {
+  # systemctl reports the unit "active" as soon as the process forks, not once
+  # it has finished opening the database and binding its control socket, so
+  # poll the actual CLI/socket path before issuing any headscale commands.
+  local attempt
+  for attempt in $(seq 1 30); do
+    if headscale nodes list --output json >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: headscale did not become ready (control socket not responding) after 30s" >&2
+  echo "Check: journalctl -u headscale --since '5 minutes ago'" >&2
+  return 1
+}
+
+echo "== Waiting for headscale to accept CLI connections =="
+wait_for_headscale_ready
+
 echo "== Ensuring the '${HEADSCALE_ADOPTION_USER}' Headscale user exists =="
 existing_users="$(headscale users list --output json)"
 if ! jq -e --arg name "$HEADSCALE_ADOPTION_USER" 'any(.[]; .name == $name)' <<<"$existing_users" >/dev/null; then
