@@ -20,6 +20,16 @@ assert_equal() {
 assert_equal "VI" "$(extract_code 'Virgin Islands (U.S.) (VI)')" "display region code"
 assert_equal "US" "$(extract_code 'us')" "plain region code"
 
+is_entrypoint "" "bash" || { echo "FAIL: streamed script was not treated as an entrypoint" >&2; exit 1; }
+is_entrypoint "/tmp/eco-node-adopt.sh" "/tmp/eco-node-adopt.sh" || {
+  echo "FAIL: directly executed script was not treated as an entrypoint" >&2
+  exit 1
+}
+if is_entrypoint "/tmp/eco-node-adopt.sh" "/tmp/test-runner.sh"; then
+  echo "FAIL: sourced script was treated as an entrypoint" >&2
+  exit 1
+fi
+
 if extract_code "usvi_atlantic" >/dev/null; then
   echo "FAIL: non-country region code was accepted" >&2
   exit 1

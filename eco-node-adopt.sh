@@ -851,8 +851,9 @@ write_identity_file() {
   local tailscale_version
   tailscale_version="$(tailscale version 2>/dev/null | head -n 1 || echo unknown)"
   local adoption_script_sha256="streamed-unavailable"
-  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-    adoption_script_sha256="$(sha256sum "${BASH_SOURCE[0]}" | awk '{print $1}')"
+  local adoption_script_path="${BASH_SOURCE[0]:-}"
+  if [[ -n "$adoption_script_path" && -f "$adoption_script_path" ]]; then
+    adoption_script_sha256="$(sha256sum "$adoption_script_path" | awk '{print $1}')"
   fi
   local identity_tmp
   identity_tmp="$(mktemp "${CONFIG_DIR}/.node-identity.XXXXXX")"
@@ -929,6 +930,12 @@ display_summary() {
   echo ""
 }
 
+is_entrypoint() {
+  local source_path="${1:-}"
+  local invocation_path="${2:-}"
+  [[ -z "$source_path" || "$source_path" == "$invocation_path" ]]
+}
+
 main() {
   require_root
   prepare_logging
@@ -953,6 +960,6 @@ main() {
   log "Node adoption complete"
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+if is_entrypoint "${BASH_SOURCE[0]:-}" "$0"; then
   main "$@"
 fi
